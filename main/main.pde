@@ -1,5 +1,5 @@
 // 進化する生態系シミュレーション
-// 「群れの力」と「進化の淘汰」
+// 「観測と介入」- 神の視点ツール
 // Joan Soler-Adillonスタイルのミニマルデザイン
 
 // ================================================================
@@ -44,19 +44,24 @@ float flockingRadius = 45;
 // 集団防衛（Mobbing）パラメータ
 float mobbingRadius = 50;
 int minMobbingCount = 3;
-float mobbingEnergyDrain = 3.5;  // Predatorが受けるダメージ
+float mobbingEnergyDrain = 3.5;
 
 // 進化パラメータ
-float mutationRate = 0.15;  // 突然変異の確率
-float mutationAmount = 0.1; // 変異の幅（パラメータの±10%）
+float mutationRate = 0.15;
+float mutationAmount = 0.1;
 
 // ビジュアル設定
 color bgColor = color(20, 20, 25);
-color preyBaseColor = color(0, 210, 200);    // シアン
-color predatorBaseColor = color(255, 50, 130); // マゼンタ
-color mobbingColor = color(255, 255, 150);   // 集団防衛時のハイライト
+color preyBaseColor = color(0, 210, 200);
+color predatorBaseColor = color(255, 50, 130);
+color mobbingColor = color(255, 255, 150);
 int creatureAlpha = 200;
 float bgFadeAlpha = 25;
+
+// グラフ設定
+float graphHeightRatio = 0.18;
+int graphMaxHistory = 400;
+color graphBgColor = color(10, 10, 15, 200);
 
 // マウス操作
 int spawnRate = 2;
@@ -68,48 +73,82 @@ ArrayList<Prey> preys;
 ArrayList<Predator> predators;
 int generation = 0;
 
+// グラフ用履歴データ
+ArrayList<Integer> preyHistory;
+ArrayList<Integer> predatorHistory;
+
+// モード切り替え
+boolean debugMode = false;
+Creature hoveredCreature = null;
+
+// シミュレーション領域
+int simHeight;
+int graphHeight;
+
 void setup() {
-  size(1000, 700);
+  size(1000, 800);
   noStroke();
   rectMode(CENTER);
+  textFont(createFont("Monospaced", 10));
+  
+  graphHeight = int(height * graphHeightRatio);
+  simHeight = height - graphHeight;
+  
+  preyHistory = new ArrayList<Integer>();
+  predatorHistory = new ArrayList<Integer>();
+  
   initSimulation();
 }
 
 void initSimulation() {
   background(bgColor);
   generation = 0;
+  preyHistory.clear();
+  predatorHistory.clear();
   
   preys = new ArrayList<Prey>();
   for (int i = 0; i < initialPreyCount; i++) {
-    preys.add(new Prey(random(width), random(height), null));
+    preys.add(new Prey(random(width), random(simHeight), null));
   }
   
   predators = new ArrayList<Predator>();
   for (int i = 0; i < initialPredatorCount; i++) {
-    predators.add(new Predator(random(width), random(height), null));
+    predators.add(new Predator(random(width), random(simHeight), null));
   }
 }
 
 void draw() {
-  // 軌跡を残す半透明背景
+  // シミュレーション領域の背景
   fill(bgColor, bgFadeAlpha);
-  rect(width/2, height/2, width, height);
+  noStroke();
+  rect(width/2, simHeight/2, width, simHeight);
+  
+  // ホバー検出リセット
+  hoveredCreature = null;
+  float closestDist = 30;
   
   // Mobbing状態をリセット
   for (Prey p : preys) {
     p.isMobbing = false;
   }
   
-  // Predatorの更新（先にMobbing判定のため）
+  // Predatorの更新
   for (int i = predators.size() - 1; i >= 0; i--) {
     Predator predator = predators.get(i);
     
-    // Mobbing判定：周囲のPrey数をカウント
+    // ホバー検出
+    float d = dist(mouseX, mouseY, predator.pos.x, predator.pos.y);
+    if (d < closestDist && mouseY < simHeight) {
+      closestDist = d;
+      hoveredCreature = predator;
+    }
+    
+    // Mobbing判定
     int nearbyPreyCount = 0;
     ArrayList<Prey> nearbyPreys = new ArrayList<Prey>();
     for (Prey prey : preys) {
-      float d = PVector.dist(predator.pos, prey.pos);
-      if (d < mobbingRadius) {
+      float pd = PVector.dist(predator.pos, prey.pos);
+      if (pd < mobbingRadius) {
         nearbyPreyCount++;
         nearbyPreys.add(prey);
       }
@@ -118,25 +157,21 @@ void draw() {
     predator.isBeingMobbed = nearbyPreyCount >= minMobbingCount;
     
     if (predator.isBeingMobbed) {
-      // 集団防衛中：Predatorがダメージを受ける
       predator.energy -= mobbingEnergyDrain;
-      // 攻撃中のPreyをハイライト
       for (Prey prey : nearbyPreys) {
         prey.isMobbing = true;
       }
     } else {
-      // 通常の捕食
       for (int j = preys.size() - 1; j >= 0; j--) {
         Prey prey = preys.get(j);
-        float d = PVector.dist(predator.pos, prey.pos);
-        if (d < eatDistance + predator.size/2) {
+        float pd = PVector.dist(predator.pos, prey.pos);
+        if (pd < eatDistance + predator.size/2) {
           preys.remove(j);
           predator.energy += predatorEnergyGain;
         }
       }
     }
     
-    // 追跡行動：最も近いPreyを追う
     predator.hunt(preys);
     predator.update();
     predator.display();
@@ -146,7 +181,6 @@ void draw() {
       continue;
     }
     
-    // 繁殖
     if (predator.energy > predatorMinReproduceEnergy && random(1) < predatorReproduceRate) {
       predator.energy -= predatorReproduceEnergyCost;
       predators.add(new Predator(predator.pos.x + random(-20, 20), predator.pos.y + random(-20, 20), predator));
@@ -158,7 +192,13 @@ void draw() {
   for (int i = preys.size() - 1; i >= 0; i--) {
     Prey prey = preys.get(i);
     
-    // フロッキング行動を適用
+    // ホバー検出
+    float d = dist(mouseX, mouseY, prey.pos.x, prey.pos.y);
+    if (d < closestDist && mouseY < simHeight) {
+      closestDist = d;
+      hoveredCreature = prey;
+    }
+    
     prey.flock(preys, predators);
     prey.update();
     prey.display();
@@ -168,7 +208,6 @@ void draw() {
       continue;
     }
     
-    // 繁殖
     if (prey.energy > preyMinReproduceEnergy && random(1) < preyReproduceRate) {
       prey.energy -= preyReproduceEnergyCost;
       preys.add(new Prey(prey.pos.x + random(-15, 15), prey.pos.y + random(-15, 15), prey));
@@ -176,13 +215,142 @@ void draw() {
     }
   }
   
+  // インスペクター描画
+  if (hoveredCreature != null) {
+    drawInspector(hoveredCreature);
+  }
+  
+  // 履歴データを記録
+  if (frameCount % 2 == 0) {
+    preyHistory.add(preys.size());
+    predatorHistory.add(predators.size());
+    if (preyHistory.size() > graphMaxHistory) {
+      preyHistory.remove(0);
+      predatorHistory.remove(0);
+    }
+  }
+  
+  // グラフ描画
+  drawGraph();
+  
   // UI表示
   displayUI();
 }
 
+void drawInspector(Creature c) {
+  // 感知範囲を描画
+  stroke(255, 80);
+  strokeWeight(1);
+  noFill();
+  ellipse(c.pos.x, c.pos.y, c.sensorRadius * 2, c.sensorRadius * 2);
+  
+  // ターゲットへの線を描画
+  if (c.target != null) {
+    stroke(255, 200, 0, 150);
+    strokeWeight(2);
+    line(c.pos.x, c.pos.y, c.target.x, c.target.y);
+  }
+  
+  // デバッグモード：フロッキング力を描画
+  if (debugMode && c instanceof Prey) {
+    Prey p = (Prey) c;
+    // Separation (赤)
+    stroke(255, 100, 100);
+    strokeWeight(2);
+    line(p.pos.x, p.pos.y, p.pos.x + p.lastSep.x * 20, p.pos.y + p.lastSep.y * 20);
+    // Alignment (緑)
+    stroke(100, 255, 100);
+    line(p.pos.x, p.pos.y, p.pos.x + p.lastAli.x * 20, p.pos.y + p.lastAli.y * 20);
+    // Cohesion (青)
+    stroke(100, 100, 255);
+    line(p.pos.x, p.pos.y, p.pos.x + p.lastCoh.x * 20, p.pos.y + p.lastCoh.y * 20);
+  }
+  
+  noStroke();
+  
+  // パラメータ表示
+  fill(255, 220);
+  textSize(10);
+  String type = (c instanceof Prey) ? "PREY" : "PRED";
+  String info = String.format("%s | Spd:%.2f Sen:%.0f Siz:%.1f E:%.0f", 
+    type, c.maxSpeed, c.sensorRadius, c.size, c.energy);
+  
+  float textX = c.pos.x + c.size + 8;
+  float textY = c.pos.y - 5;
+  
+  // 画面端補正
+  if (textX + 180 > width) textX = c.pos.x - 185;
+  if (textY < 15) textY = c.pos.y + 15;
+  
+  // 背景ボックス
+  fill(0, 180);
+  rect(textX + 85, textY, 175, 16, 3);
+  fill(255, 220);
+  textAlign(LEFT, CENTER);
+  text(info, textX + 3, textY);
+  textAlign(LEFT, BASELINE);
+}
+
+void drawGraph() {
+  // グラフ背景
+  fill(graphBgColor);
+  noStroke();
+  rect(width/2, simHeight + graphHeight/2, width, graphHeight);
+  
+  // 境界線
+  stroke(50);
+  strokeWeight(1);
+  line(0, simHeight, width, simHeight);
+  
+  if (preyHistory.size() < 2) return;
+  
+  // スケール計算
+  int maxPop = 1;
+  for (int i = 0; i < preyHistory.size(); i++) {
+    maxPop = max(maxPop, preyHistory.get(i), predatorHistory.get(i));
+  }
+  maxPop = max(maxPop, 50);
+  
+  float graphY = simHeight + 15;
+  float graphH = graphHeight - 30;
+  float stepX = (float) width / graphMaxHistory;
+  
+  // Prey線（シアン）
+  stroke(preyBaseColor);
+  strokeWeight(1.5);
+  noFill();
+  beginShape();
+  for (int i = 0; i < preyHistory.size(); i++) {
+    float x = i * stepX;
+    float y = map(preyHistory.get(i), 0, maxPop, graphY + graphH, graphY);
+    vertex(x, y);
+  }
+  endShape();
+  
+  // Predator線（マゼンタ）
+  stroke(predatorBaseColor);
+  beginShape();
+  for (int i = 0; i < predatorHistory.size(); i++) {
+    float x = i * stepX;
+    float y = map(predatorHistory.get(i), 0, maxPop, graphY + graphH, graphY);
+    vertex(x, y);
+  }
+  endShape();
+  
+  // ラベル
+  noStroke();
+  fill(preyBaseColor);
+  textSize(9);
+  text("● PREY: " + preys.size(), 10, simHeight + 13);
+  fill(predatorBaseColor);
+  text("● PRED: " + predators.size(), 90, simHeight + 13);
+  fill(100);
+  text("Max: " + maxPop, width - 60, simHeight + 13);
+}
+
 void displayUI() {
-  fill(255, 200);
-  textSize(11);
+  fill(255, 180);
+  textSize(10);
   
   // 統計情報
   float avgPreySpeed = 0, avgPredatorSpeed = 0;
@@ -191,14 +359,17 @@ void displayUI() {
   if (preys.size() > 0) avgPreySpeed /= preys.size();
   if (predators.size() > 0) avgPredatorSpeed /= predators.size();
   
-  String stats = String.format("PREY: %d (avg spd: %.2f)  |  PREDATOR: %d (avg spd: %.2f)  |  GEN: %d", 
-    preys.size(), avgPreySpeed, predators.size(), avgPredatorSpeed, generation);
-  text(stats, 10, 20);
-  text("[DRAG] add prey  |  [R] reset  |  [SPACE] add predator", 10, height - 12);
+  String stats = String.format("GEN: %d | Prey avg spd: %.2f | Predator avg spd: %.2f | FPS: %.0f", 
+    generation, avgPreySpeed, avgPredatorSpeed, frameRate);
+  text(stats, 10, 15);
+  
+  // コントロール
+  String controls = "[DRAG] Prey  [SPACE] Predator  [R] Reset";
+  text(controls, 10, 30);
 }
 
 void mouseDragged() {
-  if (frameCount % spawnRate == 0) {
+  if (mouseY < simHeight && frameCount % spawnRate == 0) {
     preys.add(new Prey(mouseX + random(-8, 8), mouseY + random(-8, 8), null));
   }
 }
@@ -207,7 +378,7 @@ void keyPressed() {
   if (key == 'r' || key == 'R') {
     initSimulation();
   }
-  if (key == ' ') {
+  if (key == ' ' && mouseY < simHeight) {
     predators.add(new Predator(mouseX, mouseY, null));
   }
 }
@@ -219,11 +390,11 @@ abstract class Creature {
   PVector pos;
   PVector vel;
   PVector acc;
+  PVector target; // インスペクター用：ターゲット位置
   
   float noiseOffsetX, noiseOffsetY;
   float noiseScale = 0.003;
   
-  // 進化する形質（遺伝子）
   float maxSpeed;
   float size;
   float sensorRadius;
@@ -237,6 +408,7 @@ abstract class Creature {
     vel = PVector.random2D();
     vel.mult(random(0.5, 1.5));
     acc = new PVector(0, 0);
+    target = null;
     noiseOffsetX = random(1000);
     noiseOffsetY = random(1000);
   }
@@ -246,7 +418,6 @@ abstract class Creature {
   }
   
   void update() {
-    // ランダムな揺らぎ（パーリンノイズ）
     float noiseX = map(noise(noiseOffsetX), 0, 1, -0.3, 0.3);
     float noiseY = map(noise(noiseOffsetY), 0, 1, -0.3, 0.3);
     applyForce(new PVector(noiseX, noiseY));
@@ -261,7 +432,6 @@ abstract class Creature {
     
     wrapAround();
     
-    // エネルギー消費（速度とサイズに依存）
     float speedCost = (maxSpeed / preyBaseMaxSpeed) * 0.5;
     float sizeCost = (size / preyBaseSize) * 0.3;
     energy -= energyDecayRate * (1 + speedCost + sizeCost);
@@ -270,13 +440,12 @@ abstract class Creature {
   void wrapAround() {
     if (pos.x < 0) pos.x = width;
     else if (pos.x > width) pos.x = 0;
-    if (pos.y < 0) pos.y = height;
-    else if (pos.y > height) pos.y = 0;
+    if (pos.y < 0) pos.y = simHeight;
+    else if (pos.y > simHeight) pos.y = 0;
   }
   
   abstract void display();
   
-  // 遺伝子の突然変異
   float mutate(float value, float min, float max) {
     if (random(1) < mutationRate) {
       float change = value * random(-mutationAmount, mutationAmount);
@@ -287,21 +456,23 @@ abstract class Creature {
 }
 
 // ================================================================
-// Prey（被食者）クラス - フロッキング行動
+// Prey（被食者）クラス
 // ================================================================
 class Prey extends Creature {
   boolean isMobbing = false;
+  PVector lastSep, lastAli, lastCoh; // デバッグ用
   
   Prey(float x, float y, Prey parent) {
     super(x, y);
+    lastSep = new PVector(0, 0);
+    lastAli = new PVector(0, 0);
+    lastCoh = new PVector(0, 0);
     
     if (parent != null) {
-      // 親から遺伝子を継承 + 突然変異
       maxSpeed = mutate(parent.maxSpeed, 1.5, 4.5);
       size = mutate(parent.size, 3, 10);
       sensorRadius = mutate(parent.sensorRadius, 30, 100);
     } else {
-      // 初期個体
       maxSpeed = preyBaseMaxSpeed + random(-0.5, 0.5);
       size = preyBaseSize + random(-1, 1);
       sensorRadius = preyBaseSensorRadius + random(-10, 10);
@@ -311,7 +482,6 @@ class Prey extends Creature {
     energyDecayRate = preyBaseEnergyDecay;
     baseColor = preyBaseColor;
     
-    // トレードオフ：大きいと遅くなる
     maxSpeed = maxSpeed * (preyBaseSize / size) * 0.8 + maxSpeed * 0.2;
   }
   
@@ -320,6 +490,11 @@ class Prey extends Creature {
     PVector ali = alignment(others);
     PVector coh = cohesion(others);
     PVector flee = flee(predators);
+    
+    // デバッグ用に保存
+    lastSep = sep.copy();
+    lastAli = ali.copy();
+    lastCoh = coh.copy();
     
     sep.mult(separationWeight);
     ali.mult(alignmentWeight);
@@ -400,10 +575,14 @@ class Prey extends Creature {
   PVector flee(ArrayList<Predator> predators) {
     PVector steer = new PVector(0, 0);
     int count = 0;
+    Predator closest = null;
+    float closestDist = sensorRadius * 1.5;
     
     for (Predator pred : predators) {
       float d = PVector.dist(pos, pred.pos);
-      if (d < sensorRadius * 1.5) {
+      if (d < closestDist) {
+        closestDist = d;
+        closest = pred;
         PVector diff = PVector.sub(pos, pred.pos);
         diff.normalize();
         diff.div(d);
@@ -411,6 +590,14 @@ class Prey extends Creature {
         count++;
       }
     }
+    
+    // ターゲット設定（逃走対象）
+    if (closest != null) {
+      target = closest.pos.copy();
+    } else {
+      target = null;
+    }
+    
     if (count > 0) {
       steer.div(count);
       steer.normalize();
@@ -431,7 +618,6 @@ class Prey extends Creature {
   }
   
   void display() {
-    // 色を形質によって変化させる
     float speedRatio = map(maxSpeed, 1.5, 4.5, 0.7, 1.3);
     float sizeRatio = map(size, 3, 10, 0.8, 1.2);
     
@@ -445,13 +631,19 @@ class Prey extends Creature {
       c = color(constrain(r, 0, 255), constrain(g, 0, 255), constrain(b, 0, 255));
     }
     
+    // ホバー時ハイライト
+    if (this == hoveredCreature) {
+      fill(255, 255);
+      rect(pos.x, pos.y, size + 4, size + 4);
+    }
+    
     fill(c, creatureAlpha);
     rect(pos.x, pos.y, size, size);
   }
 }
 
 // ================================================================
-// Predator（捕食者）クラス - 狩猟行動
+// Predator（捕食者）クラス
 // ================================================================
 class Predator extends Creature {
   boolean isBeingMobbed = false;
@@ -473,7 +665,6 @@ class Predator extends Creature {
     energyDecayRate = predatorBaseEnergyDecay;
     baseColor = predatorBaseColor;
     
-    // トレードオフ：大きいと遅くなる
     maxSpeed = maxSpeed * (predatorBaseSize / size) * 0.7 + maxSpeed * 0.3;
   }
   
@@ -489,6 +680,13 @@ class Predator extends Creature {
       }
     }
     
+    // ターゲット設定（インスペクター用）
+    if (closest != null) {
+      target = closest.pos.copy();
+    } else {
+      target = null;
+    }
+    
     if (closest != null && !isBeingMobbed) {
       PVector desired = PVector.sub(closest.pos, pos);
       desired.normalize();
@@ -497,7 +695,6 @@ class Predator extends Creature {
       steer.limit(0.4);
       applyForce(steer);
     } else if (isBeingMobbed) {
-      // 集団攻撃を受けている場合は逃げる
       PVector flee = new PVector(0, 0);
       for (Prey prey : preys) {
         float d = PVector.dist(pos, prey.pos);
@@ -524,9 +721,14 @@ class Predator extends Creature {
     
     color c = color(constrain(r, 0, 255), constrain(g, 0, 255), constrain(b, 0, 255));
     
-    // 集団攻撃を受けていたら暗くなる
     if (isBeingMobbed) {
       c = lerpColor(c, color(100, 50, 50), 0.5);
+    }
+    
+    // ホバー時ハイライト
+    if (this == hoveredCreature) {
+      fill(255, 255);
+      rect(pos.x, pos.y, size + 4, size + 4);
     }
     
     fill(c, creatureAlpha);
