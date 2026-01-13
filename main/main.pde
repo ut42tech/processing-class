@@ -1,5 +1,6 @@
 // シンプル生態系シミュレーション
 // Prey（被食者）とPredator（捕食者）の相互作用
+// Joan Soler-Adillonスタイルのミニマルデザイン
 
 // ================================================================
 // 調整用パラメータ（バランス調整用）
@@ -13,23 +14,33 @@ int initialPredatorCount = 15;
 float preyMaxSpeed = 2.5;
 float preySize = 6;
 float preyInitialEnergy = 100;
-float preyEnergyDecay = 0.15;       // 毎フレーム減少するエネルギー
-float preyReproduceRate = 0.003;    // 繁殖確率（毎フレーム）
-float preyReproduceEnergyCost = 30; // 繁殖時のエネルギーコスト
-float preyMinReproduceEnergy = 60;  // 繁殖に必要な最低エネルギー
+float preyEnergyDecay = 0.15;
+float preyReproduceRate = 0.003;
+float preyReproduceEnergyCost = 30;
+float preyMinReproduceEnergy = 60;
 
 // Predator（捕食者/肉食）のパラメータ
 float predatorMaxSpeed = 3.0;
 float predatorSize = 10;
 float predatorInitialEnergy = 150;
-float predatorEnergyDecay = 0.3;      // 毎フレーム減少するエネルギー
-float predatorEnergyGain = 80;        // Preyを食べた時に得るエネルギー
-float predatorReproduceRate = 0.01;   // 繁殖確率（条件を満たした時）
-float predatorReproduceEnergyCost = 60; // 繁殖時のエネルギーコスト
-float predatorMinReproduceEnergy = 120; // 繁殖に必要な最低エネルギー
+float predatorEnergyDecay = 0.3;
+float predatorEnergyGain = 80;
+float predatorReproduceRate = 0.01;
+float predatorReproduceEnergyCost = 60;
+float predatorMinReproduceEnergy = 120;
 
 // 接触判定距離
 float eatDistance = 10;
+
+// ビジュアル設定
+color bgColor = color(25, 25, 30);      // 濃いグレー背景
+color preyColor = color(0, 230, 220);   // シアン（Prey）
+color predatorColor = color(255, 60, 150); // マゼンタ（Predator）
+int creatureAlpha = 180;                // 透明度
+float bgFadeAlpha = 20;                 // 軌跡の残り具合（小さいほど長く残る）
+
+// マウスでPrey生成
+int spawnRate = 3; // ドラッグ中に何フレームごとに生成するか
 
 // ================================================================
 // グローバル変数
@@ -39,6 +50,13 @@ ArrayList<Predator> predators;
 
 void setup() {
   size(800, 600);
+  noStroke();
+  rectMode(CENTER);
+  initSimulation();
+}
+
+void initSimulation() {
+  background(bgColor);
   
   // Preyを初期化
   preys = new ArrayList<Prey>();
@@ -54,7 +72,9 @@ void setup() {
 }
 
 void draw() {
-  background(0);
+  // 軌跡を残すための半透明背景
+  fill(bgColor, bgFadeAlpha);
+  rect(width/2, height/2, width, height);
   
   // Preyの更新・描画
   for (int i = preys.size() - 1; i >= 0; i--) {
@@ -62,13 +82,11 @@ void draw() {
     prey.update();
     prey.display();
     
-    // エネルギーが0以下なら死亡
     if (prey.energy <= 0) {
       preys.remove(i);
       continue;
     }
     
-    // 繁殖チェック
     if (prey.energy > preyMinReproduceEnergy && random(1) < preyReproduceRate) {
       prey.energy -= preyReproduceEnergyCost;
       preys.add(new Prey(prey.x + random(-15, 15), prey.y + random(-15, 15)));
@@ -81,35 +99,45 @@ void draw() {
     predator.update();
     predator.display();
     
-    // エネルギーが0以下なら死亡
     if (predator.energy <= 0) {
       predators.remove(i);
       continue;
     }
     
-    // Preyとの接触判定（捕食）
     for (int j = preys.size() - 1; j >= 0; j--) {
       Prey prey = preys.get(j);
       float d = dist(predator.x, predator.y, prey.x, prey.y);
       if (d < eatDistance) {
-        // Preyを食べる
         preys.remove(j);
         predator.energy += predatorEnergyGain;
       }
     }
     
-    // 繁殖チェック（十分なエネルギーがある場合のみ）
     if (predator.energy > predatorMinReproduceEnergy && random(1) < predatorReproduceRate) {
       predator.energy -= predatorReproduceEnergyCost;
       predators.add(new Predator(predator.x + random(-15, 15), predator.y + random(-15, 15)));
     }
   }
   
-  // 個体数情報を表示
-  fill(255);
-  textSize(14);
-  text("Prey: " + preys.size(), 10, 25);
-  text("Predators: " + predators.size(), 10, 45);
+  // UI表示
+  fill(255, 200);
+  textSize(12);
+  text("PREY: " + preys.size() + "  |  PREDATOR: " + predators.size(), 10, 20);
+  text("[DRAG] add prey  |  [R] reset", 10, height - 15);
+}
+
+// マウスドラッグでPreyを生成
+void mouseDragged() {
+  if (frameCount % spawnRate == 0) {
+    preys.add(new Prey(mouseX + random(-5, 5), mouseY + random(-5, 5)));
+  }
+}
+
+// Rキーでリセット
+void keyPressed() {
+  if (key == 'r' || key == 'R') {
+    initSimulation();
+  }
 }
 
 // ================================================================
@@ -135,14 +163,12 @@ abstract class Creature {
   }
   
   void update() {
-    // パーリンノイズで滑らかな移動
     float angleX = map(noise(noiseOffsetX), 0, 1, -1, 1);
     float angleY = map(noise(noiseOffsetY), 0, 1, -1, 1);
     
     vx += angleX * 0.1;
     vy += angleY * 0.1;
     
-    // 速度制限
     float speed = sqrt(vx * vx + vy * vy);
     if (speed > maxSpeed) {
       vx = (vx / speed) * maxSpeed;
@@ -166,9 +192,8 @@ abstract class Creature {
   }
   
   void display() {
-    noStroke();
-    fill(c);
-    ellipse(x, y, size, size);
+    fill(c, creatureAlpha);
+    rect(x, y, size, size);
   }
 }
 
@@ -181,7 +206,7 @@ class Prey extends Creature {
     maxSpeed = preyMaxSpeed;
     size = preySize;
     energy = preyInitialEnergy;
-    c = color(100, 255, 100); // 緑色
+    c = preyColor;
   }
   
   void update() {
@@ -199,7 +224,7 @@ class Predator extends Creature {
     maxSpeed = predatorMaxSpeed;
     size = predatorSize;
     energy = predatorInitialEnergy;
-    c = color(255, 100, 100); // 赤色
+    c = predatorColor;
   }
   
   void update() {
